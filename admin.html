@@ -8,7 +8,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-auth.js";
-    import { getDatabase, ref, push, set } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js";
+    import { getDatabase, ref, push, set, onValue, remove, update } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyC4mPoV4R7NflCaQGIGsa_yi3xbcDSJvck",
@@ -19,28 +19,29 @@
       messagingSenderId: "102519493043",
       appId: "1:102519493043:web:d8f9df8263b7131bfcbbc6"
     };
+
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getDatabase(app);
 
     // Registro
-    window.registerUser = async function(e) {
+    async function registerUser(e) {
       e.preventDefault();
-      const email = document.getElementById('regEmail').value.trim();
-      const pass = document.getElementById('regPass').value.trim();
+      const email = document.getElementById('logEmail').value.trim();
+      const pass = document.getElementById('logPass').value.trim();
       const infoBox = document.getElementById('infoBox');
       infoBox.textContent = 'Creando cuenta...';
       try {
         await createUserWithEmailAndPassword(auth, email, pass);
-        infoBox.textContent = 'Cuenta creada. Ahora puedes iniciar sesión.';
+        infoBox.textContent = 'Cuenta creada correctamente. Ya puedes iniciar sesión.';
+        toggleAuthMode('login');
       } catch (err) {
-        console.error(err);
         infoBox.textContent = 'Error al crear: ' + err.message;
       }
     }
 
     // Login
-    window.loginUser = async function(e) {
+    async function loginUser(e) {
       e.preventDefault();
       const email = document.getElementById('logEmail').value.trim();
       const pass = document.getElementById('logPass').value.trim();
@@ -50,7 +51,6 @@
         await signInWithEmailAndPassword(auth, email, pass);
         infoBox.textContent = 'Sesión iniciada correctamente.';
       } catch (err) {
-        console.error(err);
         infoBox.textContent = 'Error al iniciar: ' + err.message;
       }
     }
@@ -84,35 +84,117 @@
           tutorialLink: tutorial,
           createdAt: Date.now()
         });
+        const myLink = location.origin + location.pathname.replace(/admin\.html$/,'index.html') + '?owner=' + user.uid;
         infoBox.innerHTML = `
           ✅ Publicado correctamente.<br>
-          <div class="share-link">
-            ${location.origin + location.pathname.replace(/admin\.html$/,'index.html') + '?owner=' + user.uid}
-          </div>
+          <div class="share-link">${myLink}</div>
+          <button class="copy-btn" onclick="copyLink('${myLink}')">📋 Copiar link</button>
         `;
         document.getElementById('formPost').reset();
       } catch (err) {
-        console.error(err);
         infoBox.textContent = 'Error publicando: ' + err.message;
       }
     }
 
+    // Copiar link
+    window.copyLink = function(link) {
+      navigator.clipboard.writeText(link);
+      alert("✅ Link copiado al portapapeles");
+    }
+
+    // Cargar publicaciones
+    function loadUserPosts(uid) {
+      const userPostsRef = ref(db, 'posts/' + uid);
+      const postsList = document.getElementById('userPosts');
+      onValue(userPostsRef, snapshot => {
+        postsList.innerHTML = '';
+        if (!snapshot.exists()) {
+          postsList.innerHTML = '<div class="note">Aún no tienes publicaciones.</div>';
+          return;
+        }
+        snapshot.forEach(child => {
+          const data = child.val();
+          const key = child.key;
+          const div = document.createElement('div');
+          div.className = 'post-card';
+          div.innerHTML = `
+            <strong>${data.title}</strong><br>
+            <span class="small">${new Date(data.createdAt).toLocaleString()}</span><br>
+            ${data.youtubeLink ? `<a href="${data.youtubeLink}" target="_blank">🎬 YouTube</a><br>` : ''}
+            ${data.downloadLink ? `<a href="${data.downloadLink}" target="_blank">⬇️ Descargar</a><br>` : ''}
+            ${data.tutorialLink ? `<a href="${data.tutorialLink}" target="_blank">📘 Tutorial</a><br>` : ''}
+            <div class="controls">
+              <button class="ghost" onclick="editPost('${uid}','${key}','${data.title}','${data.youtubeLink}','${data.downloadLink}','${data.tutorialLink}')">✏️ Editar</button>
+              <button class="ghost" onclick="deletePost('${uid}','${key}')">🗑️ Eliminar</button>
+            </div>
+          `;
+          postsList.appendChild(div);
+        });
+      });
+    }
+
+    // Editar publicación
+    window.editPost = function(uid, key, title, youtube, download, tutorial) {
+      const newTitle = prompt("Nuevo título:", title);
+      if (newTitle === null) return;
+      const newYouTube = prompt("Nuevo link de YouTube:", youtube);
+      const newDownload = prompt("Nuevo link de descarga:", download);
+      const newTutorial = prompt("Nuevo link de tutorial:", tutorial);
+      update(ref(db, 'posts/' + uid + '/' + key), {
+        title: newTitle,
+        youtubeLink: newYouTube,
+        downloadLink: newDownload,
+        tutorialLink: newTutorial
+      });
+      alert("✅ Publicación actualizada");
+    }
+
+    // Eliminar publicación
+    window.deletePost = function(uid, key) {
+      if (confirm("¿Seguro que deseas eliminar esta publicación?")) {
+        remove(ref(db, 'posts/' + uid + '/' + key));
+        alert("🗑️ Publicación eliminada");
+      }
+    }
+
+    // Cambiar modo entre login/registro
+    window.toggleAuthMode = function(mode) {
+      const title = document.getElementById('authTitle');
+      const button = document.getElementById('authButton');
+      const switcher = document.getElementById('switchAuth');
+      const infoBox = document.getElementById('infoBox');
+      infoBox.textContent = '';
+      if (mode === 'register') {
+        title.textContent = 'Crear cuenta nueva';
+        button.textContent = 'Registrarse';
+        button.onclick = registerUser;
+        switcher.innerHTML = '¿Ya tienes cuenta? <a href="#" onclick="toggleAuthMode(\'login\')">Inicia sesión aquí</a>';
+      } else {
+        title.textContent = 'Iniciar sesión';
+        button.textContent = 'Ingresar';
+        button.onclick = loginUser;
+        switcher.innerHTML = '¿No tienes cuenta? <a href="#" onclick="toggleAuthMode(\'register\')">Crear cuenta nueva</a>';
+      }
+      document.getElementById('formLogin').reset();
+    };
+
     // Detectar login
     onAuthStateChanged(auth, user => {
+      const adminArea = document.getElementById('adminArea');
       if (user) {
         document.getElementById('authArea').style.display = 'none';
-        document.getElementById('adminArea').style.display = 'block';
+        adminArea.style.display = 'block';
         document.getElementById('ownerDisplay').textContent = user.email || user.uid;
+        loadUserPosts(user.uid);
       } else {
         document.getElementById('authArea').style.display = 'block';
-        document.getElementById('adminArea').style.display = 'none';
+        adminArea.style.display = 'none';
+        toggleAuthMode('login');
       }
     });
 
     // Partículas
-    window.addEventListener('DOMContentLoaded', () => {
-      startParticles();
-    });
+    window.addEventListener('DOMContentLoaded', () => startParticles());
 
     function startParticles() {
       const canvas = document.getElementById('particlesAdmin');
@@ -124,29 +206,20 @@
       const PCOUNT = Math.max(30, Math.floor((W*H)/100000));
       function rand(min,max){return Math.random()*(max-min)+min;}
       for (let i=0;i<PCOUNT;i++){
-        particles.push({
-          x: Math.random()*W,
-          y: Math.random()*H,
-          vx: rand(-0.4,0.4),
-          vy: rand(-0.6,0.6),
-          r: rand(0.8,2.8),
-          hue: 260 + Math.random()*80
-        });
+        particles.push({x:Math.random()*W,y:Math.random()*H,vx:rand(-0.4,0.4),vy:rand(-0.6,0.6),r:rand(0.8,2.8),hue:260+Math.random()*80});
       }
-      function resize(){ W = canvas.width = innerWidth; H = canvas.height = innerHeight; }
-      addEventListener('resize', resize);
+      function resize(){W=canvas.width=innerWidth;H=canvas.height=innerHeight;}
+      addEventListener('resize',resize);
       function frame(){
         ctx.clearRect(0,0,W,H);
-        for (const p of particles){
-          p.x += p.vx; p.y += p.vy;
-          if (p.x < -10) p.x = W+10;
-          if (p.x > W+10) p.x = -10;
-          if (p.y < -10) p.y = H+10;
-          if (p.y > H+10) p.y = -10;
+        for(const p of particles){
+          p.x+=p.vx;p.y+=p.vy;
+          if(p.x<-10)p.x=W+10;if(p.x>W+10)p.x=-10;
+          if(p.y<-10)p.y=H+10;if(p.y>H+10)p.y=-10;
           ctx.beginPath();
-          ctx.fillStyle = `hsla(${p.hue},85%,60%,0.95)`;
-          ctx.shadowBlur = 14;
-          ctx.shadowColor = `hsla(${p.hue},85%,60%,0.95)`;
+          ctx.fillStyle=`hsla(${p.hue},85%,60%,0.95)`;
+          ctx.shadowBlur=14;
+          ctx.shadowColor=`hsla(${p.hue},85%,60%,0.95)`;
           ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
           ctx.fill();
         }
@@ -167,19 +240,22 @@
     html,body{height:100%;margin:0;font-family:Inter,system-ui,Arial,sans-serif;background:linear-gradient(180deg,#000214,#07041a);color:#eaf6ff}
     #particlesAdmin{position:fixed;left:0;top:0;width:100%;height:100%;z-index:0}
     .wrap{position:relative;z-index:2;max-width:920px;margin:36px auto;padding:28px}
-    .neon{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));padding:18px;border-radius:14px;border:1px solid rgba(140,60,255,0.08);box-shadow:0 10px 40px rgba(0,0,0,0.6)}
+    .neon{background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));padding:18px;border-radius:14px;border:1px solid rgba(140,60,255,0.08);box-shadow:0 10px 40px rgba(0,0,0,0.6)}
     h2{margin:0 0 8px 0;color:var(--accent)}
     .muted{color:var(--muted);font-size:13px;margin-bottom:12px}
     form{display:flex;flex-direction:column;gap:10px}
-    input[type=email], input[type=password], input[type=text], textarea {padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:#eaf6ff}
+    input[type=email],input[type=password],input[type=text]{padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:#eaf6ff}
     .controls{display:flex;gap:8px;flex-wrap:wrap}
     button{padding:10px 14px;border-radius:10px;border:none;background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#001;cursor:pointer;font-weight:700}
     .ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:#dfe}
     .owner-info{font-size:14px;margin-bottom:12px}
     .share-link{margin-top:8px;display:block;padding:10px;border-radius:8px;background:rgba(255,255,255,0.02);word-break:break-all;color:#cfe}
     #infoBox{margin-top:12px;color:var(--muted)}
-    .small{font-size:13px;color:var(--muted)}
-    .note{font-size:12px;color:#9aa; margin-top:6px}
+    .note{font-size:12px;color:#9aa;margin-top:6px}
+    .post-card{margin-top:10px;padding:10px;border-radius:8px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06)}
+    .copy-btn{margin-top:6px;padding:6px 10px;border:none;border-radius:8px;background:var(--accent-2);color:#001;font-weight:600;cursor:pointer}
+    #switchAuth{font-size:13px;color:var(--muted);text-align:center;margin-top:10px}
+    #switchAuth a{color:var(--accent-2);text-decoration:none;font-weight:600}
     footer{margin-top:18px;text-align:center;color:var(--muted);font-size:13px}
   </style>
 </head>
@@ -189,29 +265,18 @@
   <div class="wrap">
     <div class="neon">
       <h2>Panel Admin — Neon Creator</h2>
-      <div class="muted">Inicia sesión o regístrate con email y contraseña. Luego podrás crear publicaciones.</div>
+      <div class="muted">Inicia sesión o crea una cuenta para comenzar.</div>
 
       <div id="authArea">
-        <form id="formRegister" onsubmit="registerUser(event)">
-          <div class="small">Registro (si aún no tienes cuenta)</div>
-          <input id="regEmail" type="email" placeholder="Email (registro)" required />
-          <input id="regPass" type="password" placeholder="Contraseña (registro)" required />
+        <form id="formLogin">
+          <h3 id="authTitle">Iniciar sesión</h3>
+          <input id="logEmail" type="email" placeholder="Email" required />
+          <input id="logPass" type="password" placeholder="Contraseña" required />
           <div class="controls">
-            <button type="submit">Crear cuenta</button>
-            <button type="button" class="ghost" onclick="document.getElementById('formRegister').reset()">Limpiar</button>
-          </div>
-        </form>
-
-        <hr style="opacity:.06;margin:14px 0">
-
-        <form id="formLogin" onsubmit="loginUser(event)">
-          <div class="small">Login</div>
-          <input id="logEmail" type="email" placeholder="Email (login)" required />
-          <input id="logPass" type="password" placeholder="Contraseña (login)" required />
-          <div class="controls">
-            <button type="submit">Ingresar</button>
+            <button type="submit" id="authButton">Ingresar</button>
             <button type="button" class="ghost" onclick="document.getElementById('formLogin').reset()">Limpiar</button>
           </div>
+          <div id="switchAuth">¿No tienes cuenta? <a href="#" onclick="toggleAuthMode('register')">Crear cuenta nueva</a></div>
         </form>
       </div>
 
@@ -230,13 +295,14 @@
         </form>
 
         <div id="infoBox" class="note">Después de publicar verás el link único que muestra SOLO tus publicaciones.</div>
-      </div>
 
+        <hr style="opacity:.06;margin:20px 0">
+        <h3>Tus publicaciones</h3>
+        <div id="userPosts"></div>
+      </div>
     </div>
 
-    <footer>
-      © 2024 - 2025 𝐋𝐔𝐂𝐊 𝐗!𝐓
-    </footer>
+    <footer>© 2024 - 2025 𝐋𝐔𝐂𝐊 𝐗!𝐓</footer>
   </div>
 </body>
 </html>
